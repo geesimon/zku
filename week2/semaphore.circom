@@ -116,7 +116,9 @@ template Semaphore(nLevels) {
     signal signalHashSquared;
     signalHashSquared <== signalHash * signalHash;
 
-    // To be used to verfiy signal is only endorsed once 
+    // To verfiy the nullifier is only used once (by contract SemaphoreCore._isValidProof()
+    // this is to prevent the same signal to be endorsed more than once 
+    // (as to prevent the case: double spending). 
     nullifierHash <== calculateNullifierHash.out;
 }
 
