@@ -57,7 +57,7 @@ template CalculateNullifierHash() {
     out <== poseidon.out;
 }
 
-/// @dev build verifier, to verify
+/// @dev Build verifier to verify:
 /// 1. merkle_root == calculate_merkle_root(identity_commitment, treePathIndices, treeSiblings)
 /// 2. nullifierHash == CalculateNullifierHash(externalNullifier, identityNullifier)
 
