@@ -1,0 +1,16 @@
+[31;22m[ERROR] [39;1msnarkJS[0m: Error: ENOENT: no such file or directory, open 'triangeljump_public.json'
+    at Object.openSync (node:fs:585:3)
+    at Object.readFileSync (node:fs:453:35)
+    at Object.zkeyExportSolidityCalldata [as action] (/usr/local/lib/node_modules/snarkjs/build/cli.cjs:8434:70)
+    at clProcessor (/usr/local/lib/node_modules/snarkjs/build/cli.cjs:302:31)
+    at Object.<anonymous> (/usr/local/lib/node_modules/snarkjs/build/cli.cjs:8127:1)
+    at Module._compile (node:internal/modules/cjs/loader:1103:14)
+    at Object.Module._extensions..js (node:internal/modules/cjs/loader:1155:10)
+    at Module.load (node:internal/modules/cjs/loader:981:32)
+    at Function.Module._load (node:internal/modules/cjs/loader:822:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:77:12) {
+  errno: -2,
+  syscall: 'open',
+  code: 'ENOENT',
+  path: 'triangeljump_public.json'
+}

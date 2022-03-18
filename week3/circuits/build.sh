@@ -120,3 +120,5 @@ snarkjs groth16 verify $verification_file $public_file $proof_file
 
 # Generate a Solidity verifier that allows verifying proofs on Ethereum blockchain
 snarkjs zkey export solidityverifier ${base_name}_0001.zkey ${base_name}_verifier.sol
+
+snarkjs zkey export soliditycalldata ${base_name}_public.json ${base_name}_proof.json > ${base_name}_verifier.call.txt
