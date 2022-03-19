@@ -74,5 +74,3 @@ template RevealNumber() {
     // Check the card number is a equal to a specific number
     number === number_to_reveal;
 }
-
-component main = CheckSuite();
