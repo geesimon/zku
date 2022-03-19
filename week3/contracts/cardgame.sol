@@ -36,6 +36,7 @@ contract Card is Ownable {
         card_same_suite_verifier = ICardSameSuiteVerifier(addr_same_suite);
     }
 
+    // Store commitment on chain
     function deal(uint commitment) external onlyOwner {
         require(cards[commitment] == CardStatus.READY, "The card is alrady dealed");
 
