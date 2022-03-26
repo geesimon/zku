@@ -109,7 +109,7 @@ contract RollupNC is Update_verifier, Withdraw_verifier{
     /// @Dev User tries to deposit ERC20 tokens
     /// @param pubkey: user's public key
     /// @param amount: deposit amount
-    /// @param tokenType: 0 (coodinator only), 1 (ETH) and >1 (ERC20 token)
+    /// @param tokenType: 0 (coodinator only), 1 (ETH),  >1 (ERC20 token)
     function deposit(
         uint[2] memory pubkey,
         uint amount,
