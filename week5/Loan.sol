@@ -4,6 +4,8 @@ import "@aztec/protocol/contracts/libs/NoteUtils.sol";
 import "@aztec/protocol/contracts/interfaces/IZkAsset.sol";
 import "./LoanUtilities.sol";
 
+
+/// @Title Loan contract 
 contract Loan is ZkAssetMintable {
 
   using SafeMath for uint256;
@@ -12,6 +14,7 @@ contract Loan is ZkAssetMintable {
   LoanUtilities.LoanVariables public loanVariables;
 
 
+  // Settlement ZKAsset handle value transfer
   IZkAsset public settlementToken;
   // [0] interestRate
   // [1] interestPeriod
@@ -28,6 +31,7 @@ contract Loan is ZkAssetMintable {
   event LoanDefault();
   event LoanRepaid();
 
+  // AZTec Note
   struct Note {
     address owner;
     bytes32 noteHash;
@@ -39,6 +43,7 @@ contract Loan is ZkAssetMintable {
   }
 
 
+  // Construct a loan contract and store loan settings
   constructor(
     bytes32 _notional,
     uint256[] memory _loanVariables,
@@ -58,23 +63,32 @@ contract Loan is ZkAssetMintable {
       loanVariables.aceAddress = _aceAddress;
   }
 
+  /// @dev Request permission to view the loan
   function requestAccess() public {
     lenderApprovals[msg.sender] = '0x';
   }
 
+  /// @dev Approves lender loan view request
   function approveAccess(address _lender, bytes memory _sharedSecret) public {
     lenderApprovals[_lender] = _sharedSecret;
   }
 
+  /// @dev Settle loan by validating proof and updating note registry
   function settleLoan(
     bytes calldata _proofData,
     bytes32 _currentInterestBalance,
     address _lender
   ) external {
+    // Only loan aApp can settle the loan
     LoanUtilities.onlyLoanDapp(msg.sender, loanVariables.loanFactory);
 
+    // Validate loan settlement bilateralSwap proof.
+    // The proof outputs are used to update the retrospective note registries.
+    // This will destroy the takerBid note and create the makerAsk note in the settlement ZkAsset note registry,
+    // and destroy the makerBid note and create the takerAsk note in the loan ZkAsset note registry.
     LoanUtilities._processLoanSettlement(_proofData, loanVariables);
 
+    // Store timestamp to calculate accrued interest 
     loanVariables.loanSettlementDate = block.timestamp;
     loanVariables.lastInterestPaymentDate = block.timestamp;
     loanVariables.currentInterestBalance = _currentInterestBalance;
@@ -82,7 +96,10 @@ contract Loan is ZkAssetMintable {
     lender = _lender;
   }
 
+  /// @dev Create loan note in loan ZkAsset note registry.
+  /// @param _proof:  proof that the loan notional note is created by client correctly
   function confidentialMint(uint24 _proof, bytes calldata _proofData) external {
+    // Only loan aApp can mint the loan note
     LoanUtilities.onlyLoanDapp(msg.sender, loanVariables.loanFactory);
     require(msg.sender == owner, "only owner can call the confidentialMint() method");
     require(_proofData.length != 0, "proof invalid");
@@ -101,7 +118,9 @@ contract Loan is ZkAssetMintable {
     emit UpdateTotalMinted(noteHash, metadata);
   }
 
-
+  /// @dev Lender withdraw interest 
+  /// @param _proof1: DIVIDEND_PROOF that proves accrued interest is calculated correctly
+  /// @param _proof1: JOIN_SPLIT_PROOF that proves interest note join-split operation is done correctly
   function withdrawInterest(
     bytes memory _proof1,
     bytes memory _proof2,
@@ -113,6 +132,7 @@ contract Loan is ZkAssetMintable {
 
     (bytes32 newCurrentInterestNoteHash) = LoanUtilities._processInterestWithdrawal(_proof2, _proof1OutputNotes, loanVariables);
 
+    // update interest note and subtotal of interest that has been withdrew
     loanVariables.currentInterestBalance = newCurrentInterestNoteHash;
     loanVariables.lastInterestPaymentDate = loanVariables.lastInterestPaymentDate.add(_interestDurationToWithdraw);
 
@@ -120,14 +140,20 @@ contract Loan is ZkAssetMintable {
 
   }
 
+  /// @dev Borrower pay interest
+  /// @param _proofData: JOIN_SPLIT_PROOF that proves interest note join-split operation is done correctly
   function adjustInterestBalance(bytes memory _proofData) public {
 
     LoanUtilities.onlyBorrower(msg.sender,borrower);
 
     (bytes32 newCurrentInterestBalance) = LoanUtilities._processAdjustInterest(_proofData, loanVariables);
+    // // update interest note after paying the interest
     loanVariables.currentInterestBalance = newCurrentInterestBalance;
   }
 
+  /// @dev Borrower repay loan
+  /// @param _proof1: DIVIDEND_PROOF that proves accrued interest plus remaining interest is calculated correctly
+  /// @param _proof2: JOIN_SPLIT_PROOF that interest note join-split operation is done correctly
   function repayLoan(
     bytes memory _proof1,
     bytes memory _proof2
@@ -136,11 +162,12 @@ contract Loan is ZkAssetMintable {
 
     uint256 remainingInterestDuration = loanVariables.loanSettlementDate.add(loanVariables.duration).sub(loanVariables.lastInterestPaymentDate);
 
+    // validate: repayment == accrued interest + remaining interest
     (,bytes memory _proof1OutputNotes) = LoanUtilities._validateInterestProof(_proof1, remainingInterestDuration, loanVariables);
 
     require(loanVariables.loanSettlementDate.add(loanVariables.duration) < block.timestamp, 'loan has not matured');
 
-
+    // make the payment
     LoanUtilities._processLoanRepayment(
       _proof2,
       _proof1OutputNotes,
@@ -150,6 +177,11 @@ contract Loan is ZkAssetMintable {
     emit LoanRepaid();
   }
 
+  /// @dev Lender mark default of the loan if the interest account has less 
+  ///      fund than the (expected) accrued interest
+  /// @param _proof1: DIVIDEND_PROOF that proves accrued interest plus remaining interest is calculated correctly
+  /// @param _proof2: PRIVATE_RANGE_PROOF that proves the accrued interest is greater than the
+  ///                 available balance inside the interest account.
   function markLoanAsDefault(bytes memory _proof1, bytes memory _proof2, uint256 _interestDurationToWithdraw) public {
     require(_interestDurationToWithdraw.add(loanVariables.lastInterestPaymentDate) < block.timestamp, 'withdraw is greater than accrued interest');
     LoanUtilities._validateDefaultProofs(_proof1, _proof2, _interestDurationToWithdraw, loanVariables);

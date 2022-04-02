@@ -6,6 +6,8 @@ import "@aztec/protocol/contracts/ERC1724/ZkAsset.sol";
 import "./ZKERC20/ZKERC20.sol";
 import "./Loan.sol";
 
+
+/// @Title LoanDapp contract
 contract LoanDapp is IAZTEC {
   using NoteUtils for bytes;
 
@@ -70,6 +72,7 @@ contract LoanDapp is IAZTEC {
     aceAddress = _aceAddress;
   }
 
+  /// @dev Retreive registered settlement ZkAsset
   function _getCurrencyContract(uint _settlementCurrencyId) internal view returns (address) {
     require(settlementCurrencies[_settlementCurrencyId] != address(0), 'Settlement Currency is not defined');
     return settlementCurrencies[_settlementCurrencyId];
@@ -79,6 +82,7 @@ contract LoanDapp is IAZTEC {
     return uint(keccak256(abi.encodePacked(_note, _user)));
   }
 
+  /// @dev Give note access permission to user who knows a shared secret
   function _approveNoteAccess(
     bytes32 _note,
     address _userAddress,
@@ -93,6 +97,10 @@ contract LoanDapp is IAZTEC {
     );
   }
 
+  /// @dev Create a loan contract and save to array:loans
+  /// @param _notional: loan notional note created by borrower
+  /// @param _loanVariables: loan settings
+  /// @param _proofData: mint proof used to mint new notes inside the loan’s note registry 
   function _createLoan(
     bytes32 _notional,
     uint256[] memory _loanVariables,
@@ -117,11 +125,13 @@ contract LoanDapp is IAZTEC {
     return address(newLoan);
   }
 
+  /// @dev Register supported token as settlment ZkAsset
   function addSettlementCurrency(uint _id, address _address) external onlyOwner {
     settlementCurrencies[_id] = _address;
     emit SettlementCurrencyAdded(_id, _address);
   }
 
+  /// @dev Borrower create a loan
   function createLoan(
     bytes32 _notional,
     string calldata _viewingKey,
@@ -148,6 +158,7 @@ contract LoanDapp is IAZTEC {
       block.timestamp
     );
 
+    // approve note access by borrower
     _approveNoteAccess(
       _notional,
       msg.sender,
@@ -155,6 +166,7 @@ contract LoanDapp is IAZTEC {
     );
   }
 
+  /// @dev Approve spending of loan notional note
   function approveLoanNotional(
     bytes32 _noteHash,
     bytes memory _signature,
@@ -165,6 +177,7 @@ contract LoanDapp is IAZTEC {
     emit LoanApprovedForSettlement(_loanId);
   }
 
+  /// @dev Request viewing of loan amount
   function submitViewRequest(address _loanId, string calldata _lenderPublicKey) external {
     emit ViewRequestCreated(
       _loanId,
@@ -173,6 +186,8 @@ contract LoanDapp is IAZTEC {
     );
   }
 
+  /// @dev Give permission for viewing loan amount to lender 
+  ///      who owns a shared secret with the borrower
   function approveViewRequest(
     address _loanId,
     address _lender,
@@ -204,6 +219,7 @@ contract LoanDapp is IAZTEC {
 
   mapping(uint => mapping(uint => LoanPayment)) public loanPayments;
 
+  /// @dev Settle loan between borrower and lender
   function settleInitialBalance(
     address _loanId,
     bytes calldata _proofData,
@@ -219,6 +235,8 @@ contract LoanDapp is IAZTEC {
     );
   }
 
+  /// @dev Give note access permission to caller who ownes the viewing key
+  ///      and a pecified user who know a shared key
   function approveNoteAccess(
     bytes32 _note,
     string calldata _viewingKey,
