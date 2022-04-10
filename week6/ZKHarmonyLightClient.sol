@@ -114,79 +114,22 @@ contract HarmonyLightClient is
         emit RelayerRemoved(relayerAddress);
     }
 
-    /// @dev initialize firstBlock, epochCheckPointBlockNumbers and checkPointBlocks,
-    ///      and register replyers
+
     function initialize(
         bytes32 memory firstMMRRoot,
-        address[] memory zkProof,
+        Proof memory zkrProof,
     ) external initializer {
-        
-        HarmonyParser.BlockHeader memory header = HarmonyParser.toBlockHeader(
-            firstRlpHeader
-        );
-        
-        firstBlock.parentHash = header.parentHash;
-        firstBlock.stateRoot = header.stateRoot;
-        firstBlock.transactionsRoot = header.transactionsRoot;
-        firstBlock.receiptsRoot = header.receiptsRoot;
-        firstBlock.number = header.number;
-        firstBlock.epoch = header.epoch;
-        firstBlock.shard = header.shardID;
-        firstBlock.time = header.timestamp;
-        firstBlock.mmrRoot = HarmonyParser.toBytes32(header.mmrRoot);
-        firstBlock.hash = header.hash;
-        
-        epochCheckPointBlockNumbers[header.epoch].push(header.number);
-        checkPointBlocks[header.number] = firstBlock;
+        MMRRoot = firstMMRRoot;
 
-        epochMmrRoots[header.epoch][firstBlock.mmrRoot] = true;
+        require(verify(zkrProof, firstMMRRoot), "invalid recursive proof");
 
-        relayerThreshold = initialRelayerThreshold;
-        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        for (uint256 i; i < initialRelayers.length; i++) {
-            grantRole(RELAYER_ROLE, initialRelayers[i]);
-        }
-
+        MMRRoot = zkrProof.output["mmrRoot"];
     }
 
-    /// @dev called by relayer to update Harmony status by giving a checkpoint block.
-    ///      By leveraging mmr root in checkpoint block, we don't need to call 
-    ///      this function once for every Harmony block. The checkpoint block represents 
-    ///      x amount of blocks and is stored in checkPointBlocks.
-    ///      Later, these checkpoint blocks can be used to verify transation inclusion.
-    function submitCheckpoint(bytes memory rlpHeader) external onlyRelayers whenNotPaused {
-        HarmonyParser.BlockHeader memory header = HarmonyParser.toBlockHeader(
-            rlpHeader
-        );
+    function submitCheckpoint(Proof memory zkCheckPointProof) external onlyRelayers whenNotPaused {
+        require(verify(zkCheckPointProof, MMRRoot), "invalid recursive proof");
 
-        BlockHeader memory checkPointBlock;
-        
-        checkPointBlock.parentHash = header.parentHash;
-        checkPointBlock.stateRoot = header.stateRoot;
-        checkPointBlock.transactionsRoot = header.transactionsRoot;
-        checkPointBlock.receiptsRoot = header.receiptsRoot;
-        checkPointBlock.number = header.number;
-        checkPointBlock.epoch = header.epoch;
-        checkPointBlock.shard = header.shardID;
-        checkPointBlock.time = header.timestamp;
-        checkPointBlock.mmrRoot = HarmonyParser.toBytes32(header.mmrRoot);
-        checkPointBlock.hash = header.hash;
-        
-        epochCheckPointBlockNumbers[header.epoch].push(header.number);
-        checkPointBlocks[header.number] = checkPointBlock;
-
-        epochMmrRoots[header.epoch][checkPointBlock.mmrRoot] = true;
-        emit CheckPoint(
-            checkPointBlock.stateRoot,
-            checkPointBlock.transactionsRoot,
-            checkPointBlock.receiptsRoot,
-            checkPointBlock.number,
-            checkPointBlock.epoch,
-            checkPointBlock.shard,
-            checkPointBlock.time,
-            checkPointBlock.mmrRoot,
-            checkPointBlock.hash
-        );
+        MMRRoot = zkCheckPointProof.output["mmrRoot"];
     }
 
     /// @dev retreive the nearest check point block for a given block number
