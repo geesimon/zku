@@ -6,6 +6,13 @@ import "./INearBridge.sol";
 import "./NearDecoder.sol";
 import "./Ed25519.sol";
 
+/// @title Near Light Client smart contract that deployed on Ethereum.
+///        This contract is called by Eth2NearRelay to synchronize 
+///        block chain status of Near. Due to the prohibitive gas consumption, 
+///        block multi-sig verification is not done during status update. 
+///        Instead, a optimistic approach is used to encourage 3rd party to 
+///        run a Wathdog and challenge (and get reward) to find and correct 
+///        the dishonest status update.
 contract NearBridge is INearBridge, AdminControlled {
     using Borsh for Borsh.Data;
     using NearDecoder for Borsh.Data;
@@ -13,6 +20,7 @@ contract NearBridge is INearBridge, AdminControlled {
     // Assumed to be even and to not exceed 256.
     uint constant MAX_BLOCK_PRODUCERS = 100;
 
+    /// @dev each epoch has approximately 43k blocks
     struct Epoch {
         bytes32 epochId;
         uint numBPs;
@@ -26,6 +34,9 @@ contract NearBridge is INearBridge, AdminControlled {
     uint256 public lockDuration;
     // replaceDuration is in nanoseconds, because it is a difference between NEAR timestamps.
     uint256 public replaceDuration;
+
+    /// @dev Ed25519 is the contract to verify BLS multi-sig of a epoch.
+    ///      It only get called by a challenger
     Ed25519 immutable edwards;
 
     // End of challenge period. If zero, untrusted* fields and lastSubmitter are not meaningful.
@@ -40,6 +51,8 @@ contract NearBridge is INearBridge, AdminControlled {
 
     // Whether the contract was initialized.
     bool public initialized;
+
+    /// @dev Posted status update but still in valid challenge period (4 hours)
     bool untrustedNextEpoch;
     bytes32 untrustedHash;
     bytes32 untrustedMerkleRoot;
@@ -48,6 +61,7 @@ contract NearBridge is INearBridge, AdminControlled {
     uint256 untrustedSignatureSet;
     NearDecoder.Signature[MAX_BLOCK_PRODUCERS] untrustedSignatures;
 
+    /// @dev can hanle as many as 3 untrusted epochs' data (12 hour)
     Epoch[3] epochs;
     uint256 curEpoch;
 
@@ -55,6 +69,7 @@ contract NearBridge is INearBridge, AdminControlled {
     mapping(uint64 => bytes32) blockMerkleRoots_;
     mapping(address => uint256) public override balanceOf;
 
+    /// @dev contract deployer needs to set appropriate parameters
     constructor(
         Ed25519 ed,
         uint256 lockEthAmount_,
@@ -70,6 +85,7 @@ contract NearBridge is INearBridge, AdminControlled {
         replaceDuration = replaceDuration_;
     }
 
+    /// @dev pause actions to enable/disable specific function calls
     uint constant UNPAUSE_ALL = 0;
     uint constant PAUSED_DEPOSIT = 1;
     uint constant PAUSED_WITHDRAW = 2;
@@ -77,12 +93,18 @@ contract NearBridge is INearBridge, AdminControlled {
     uint constant PAUSED_CHALLENGE = 8;
     uint constant PAUSED_VERIFY = 16;
 
+    /// @dev submitter deposit a bond with amount: lockEthAmount.
+    ///      the submitter is the user who want to use Eth2NearRelay to update status.
+    ///      This is the secure deposit that can be forfeit in case a challenger
+    ///      successfully challenged the dishonest update.
     function deposit() public payable override pausable(PAUSED_DEPOSIT) {
         require(msg.value == lockEthAmount && balanceOf[msg.sender] == 0);
         balanceOf[msg.sender] = msg.value;
     }
 
+    /// @dev submitter withdraw bond
     function withdraw() public override pausable(PAUSED_WITHDRAW) {
+        /// @dev make sure the submitter has no block under challenge period
         require(msg.sender != lastSubmitter || block.timestamp >= lastValidAt);
         uint amount = balanceOf[msg.sender];
         require(amount != 0);
@@ -90,15 +112,22 @@ contract NearBridge is INearBridge, AdminControlled {
         payable(msg.sender).transfer(amount);
     }
 
+    /// @dev challenger submit a challenge.
     function challenge(address payable receiver, uint signatureIndex) external override pausable(PAUSED_CHALLENGE) {
-        require(block.timestamp < lastValidAt, "No block can be challenged at this time");
+        require(block.timestamp < lastValidAt, "No block can be challenged at this time");        
         require(!checkBlockProducerSignatureInHead(signatureIndex), "Can't challenge valid signature");
 
+        /// @dev the previous submitter is punished by forfeiting the its bond
         balanceOf[lastSubmitter] = balanceOf[lastSubmitter] - lockEthAmount;
         lastValidAt = 0;
+        /// @dev Successful chanllenge will get half of the bond
         receiver.call{value: lockEthAmount / 2}("");
     }
 
+    /// @dev verify submitted epoch data by checking multi-siganature through
+    ///      contract Ed25519. This is a expensive operation (cost around 500K gas)
+    ///      and at the expense of challenger. Therefore, it is supposed to be called 
+    ///      only after challenger found a dishonest epoch post through Watchdog.
     function checkBlockProducerSignatureInHead(uint signatureIndex) public view override returns (bool) {
         // Shifting by a number >= 256 returns zero.
         require((untrustedSignatureSet & (1 << signatureIndex)) != 0, "No such signature");
@@ -115,6 +144,8 @@ contract NearBridge is INearBridge, AdminControlled {
             return edwards.check(untrustedEpoch.keys[signatureIndex], signature.r, signature.s, arg1, arg2);
         }
     }
+
+    /// @dev called by admin to setup validators and first block
 
     // The first part of initialization -- setting the validators of the current epoch.
     function initWithValidators(bytes memory data) public override onlyAdmin {
@@ -154,6 +185,8 @@ contract NearBridge is INearBridge, AdminControlled {
         uint numBlockProducers; // Number of block producers for the current unconfirmed block
     }
 
+    /// @dev called by relayer to retreive light client status 
+    ///      so that it can resume (say: after restart) from the previous update.
     function bridgeState() public view returns (BridgeState memory res) {
         if (block.timestamp < lastValidAt) {
             res.currentHeight = curHeight;
@@ -167,6 +200,16 @@ contract NearBridge is INearBridge, AdminControlled {
         }
     }
 
+    /// @dev summitter/relayer submit a new block.
+    ///      Only submitter with enough bond can post new block.
+    ///      Since every Near header contains a root of the merkle tree 
+    ///      computed from all headers before it, its unnecessary to post 
+    ///      every block or epoch. But need to control post frequency
+    ///      to reduce gas usage (within replaceDuration).
+    ///      Block signatures are not verified but only some light checkes
+    ///      are done: incremental block number and more than 2/3 stake of
+    ///      validators' signed the block.
+    
     function addLightClientBlock(bytes memory data) public override pausable(PAUSED_ADD_BLOCK) {
         require(initialized, "Contract is not initialized");
         require(balanceOf[msg.sender] >= lockEthAmount, "Balance is not enough");
@@ -261,6 +304,10 @@ contract NearBridge is INearBridge, AdminControlled {
         }
     }
 
+    /// @dev set validators and their public key for a epoch. 
+    ///      These validators are fixed and verify all blocks during a epoch.
+    ///      The voting power is controlled by stake share. Near needs
+    ///      validators with more than 2/3 of total validator' stake to sign a block.
     function setBlockProducers(NearDecoder.BlockProducer[] memory src, Epoch storage epoch) internal {
         uint cnt = src.length;
         require(
